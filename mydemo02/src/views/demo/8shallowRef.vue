@@ -9,6 +9,10 @@
 </template>
  
 <script>
+// 这是一个浅层的 ref，与 shallowReactive 一样是拿来做性能优化的
+
+// shallowReactive 是监听对象第一层的数据变化用于驱动视图更新，
+// 那么 shallowRef 则是监听 .value 的值的变化来更新视图的
 import { shallowRef } from "vue";
 export default {
   setup() {

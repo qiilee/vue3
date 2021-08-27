@@ -1,6 +1,5 @@
 <template>
     <div id="app">
-        {{state}}
     </div>
 </template>
    
