@@ -21,6 +21,6 @@ export default {
 
     // 3. 将响应式数据对象state return 出去，供template使用
     return { state, handleClick };
-  }
+  },
 };
 </script>

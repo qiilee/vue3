@@ -1,7 +1,7 @@
 <template>
   <div id="app">
-    <h1>{{count}}</h1>
-    <h1>{{double}}</h1>
+    <h1>{{ count }}</h1>
+    <h1>{{ double }}</h1>
     <button @click="increase">+1</button>
   </div>
 </template>
@@ -42,8 +42,8 @@ export default {
     return {
       count,
       increase,
-      double
+      double,
     };
-  }
+  },
 };
 </script>

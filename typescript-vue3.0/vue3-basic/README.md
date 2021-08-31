@@ -16,3 +16,17 @@ commits 按照教学顺序倒序排列，最新的小节是最上面的提交，
 * 流程图和原型图
 * 购买后直接可以接入使用的真实后端API
 * **如果您想学习本课程，请支持正版，谢谢！ [https://coding.imooc.com/class/449.html](https://coding.imooc.com/class/449.html)**
+
+
+<!-- vue2 与 vue3 双向绑定原理对比 -->
+```js
+Object.defineproperty(data, 'count', {
+    get(){},
+    set(){}
+})
+
+new Proxy(data, {
+    get(key) {},
+    set(key, value){}
+})
+```

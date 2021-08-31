@@ -6,7 +6,7 @@ let firstName: string = 'viking'
 let message: string = `Hello, ${firstName}`
 
 let u: undefined = undefined
-let n:null = null
+let n: null = null
 
 let num: number = undefined
 

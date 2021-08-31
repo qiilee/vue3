@@ -1,7 +1,7 @@
 interface Person {
-  readonly id: number;
+  readonly id: number; // 只读属性
   name: string;
-  age?: number;
+  age?: number; // ?的意思 age属性可有可无
 }
 
 let viking: Person = {
