@@ -14,10 +14,15 @@ export default defineComponent({
   },
   emits: {
     'close-modal': null
+    // 验证函数
+    // 'close-modal': (payload: any) =>{
+    //   return payload.type == "close"
+    // }
   },
   setup(props, context) {
     const buttonClick = () => {
       context.emit('close-modal')
+      // context.emit('close-modal', {type: "close"})
     }
     return {
       buttonClick

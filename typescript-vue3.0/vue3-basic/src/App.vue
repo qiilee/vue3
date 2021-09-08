@@ -87,7 +87,7 @@ export default {
       error.value = e;
       return true;
     });
-    // 4
+    // 4 3-10 vue3 模块化妙用- 鼠标追踪器
     const { x, y } = useMousePosition();
     const { result, loading, loaded } = useURLLoader<CatResult[]>(
       "https://api.thecatapi.com/v1/images/search?limit=1"

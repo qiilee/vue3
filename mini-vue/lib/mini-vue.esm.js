@@ -51,7 +51,7 @@ function makeMap(str, expectsLowerCase) {
     }
     return expectsLowerCase ? val => !!map[val.toLowerCase()] : val => !!map[val];
 }
-const EMPTY_OBJ = Object.freeze({})
+Object.freeze({})
     ;
 Object.freeze([]) ;
 const extend = Object.assign;
@@ -85,7 +85,7 @@ const cacheStringFunction = (fn) => {
  */
 const capitalize$1 = cacheStringFunction((str) => str.charAt(0).toUpperCase() + str.slice(1));
 // compare whether a value has changed, accounting for NaN.
-const hasChanged = (value, oldValue) => value !== oldValue && (value === value || oldValue === oldValue);
+const hasChanged = (value, oldValue) => !Object.is(value, oldValue);
 const def = (obj, key, value) => {
     Object.defineProperty(obj, key, {
         configurable: true,
@@ -94,64 +94,188 @@ const def = (obj, key, value) => {
     });
 };
 
+function warn(msg, ...args) {
+    console.warn(`[Vue warn] ${msg}`, ...args);
+}
+
+let activeEffectScope;
+const effectScopeStack = [];
+class EffectScope {
+    constructor(detached = false) {
+        this.active = true;
+        this.effects = [];
+        this.cleanups = [];
+        if (!detached && activeEffectScope) {
+            this.parent = activeEffectScope;
+            this.index =
+                (activeEffectScope.scopes || (activeEffectScope.scopes = [])).push(this) - 1;
+        }
+    }
+    run(fn) {
+        if (this.active) {
+            try {
+                this.on();
+                return fn();
+            }
+            finally {
+                this.off();
+            }
+        }
+        else {
+            warn(`cannot run an inactive effect scope.`);
+        }
+    }
+    on() {
+        if (this.active) {
+            effectScopeStack.push(this);
+            activeEffectScope = this;
+        }
+    }
+    off() {
+        if (this.active) {
+            effectScopeStack.pop();
+            activeEffectScope = effectScopeStack[effectScopeStack.length - 1];
+        }
+    }
+    stop(fromParent) {
+        if (this.active) {
+            this.effects.forEach(e => e.stop());
+            this.cleanups.forEach(cleanup => cleanup());
+            if (this.scopes) {
+                this.scopes.forEach(e => e.stop(true));
+            }
+            // nested scope, dereference from parent to avoid memory leaks
+            if (this.parent && !fromParent) {
+                // optimized O(1) removal
+                const last = this.parent.scopes.pop();
+                if (last && last !== this) {
+                    this.parent.scopes[this.index] = last;
+                    last.index = this.index;
+                }
+            }
+            this.active = false;
+        }
+    }
+}
+function effectScope(detached) {
+    return new EffectScope(detached);
+}
+function recordEffectScope(effect, scope) {
+    scope = scope || activeEffectScope;
+    if (scope && scope.active) {
+        scope.effects.push(effect);
+    }
+}
+function getCurrentScope() {
+    return activeEffectScope;
+}
+function onScopeDispose(fn) {
+    if (activeEffectScope) {
+        activeEffectScope.cleanups.push(fn);
+    }
+    else {
+        warn(`onScopeDispose() is called when there is no active effect scope` +
+            ` to be associated with.`);
+    }
+}
+
+const createDep = (effects) => {
+    const dep = new Set(effects);
+    dep.w = 0;
+    dep.n = 0;
+    return dep;
+};
+const wasTracked = (dep) => (dep.w & trackOpBit) > 0;
+const newTracked = (dep) => (dep.n & trackOpBit) > 0;
+const initDepMarkers = ({ deps }) => {
+    if (deps.length) {
+        for (let i = 0; i < deps.length; i++) {
+            deps[i].w |= trackOpBit; // set was tracked
+        }
+    }
+};
+const finalizeDepMarkers = (effect) => {
+    const { deps } = effect;
+    if (deps.length) {
+        let ptr = 0;
+        for (let i = 0; i < deps.length; i++) {
+            const dep = deps[i];
+            if (wasTracked(dep) && !newTracked(dep)) {
+                dep.delete(effect);
+            }
+            else {
+                deps[ptr++] = dep;
+            }
+            // clear bits
+            dep.w &= ~trackOpBit;
+            dep.n &= ~trackOpBit;
+        }
+        deps.length = ptr;
+    }
+};
+
 const targetMap = new WeakMap();
+// The number of effects currently being tracked recursively.
+let effectTrackDepth = 0;
+let trackOpBit = 1;
+/**
+ * The bitwise track markers support at most 30 levels op recursion.
+ * This value is chosen to enable modern JS engines to use a SMI on all platforms.
+ * When recursion depth is greater, fall back to using a full cleanup.
+ */
+const maxMarkerBits = 30;
 const effectStack = [];
 let activeEffect;
 const ITERATE_KEY = Symbol('iterate' );
 const MAP_KEY_ITERATE_KEY = Symbol('Map key iterate' );
-function isEffect(fn) {
-    return fn && fn._isEffect === true;
-}
-function effect(fn, options = EMPTY_OBJ) {
-    if (isEffect(fn)) {
-        fn = fn.raw;
+class ReactiveEffect {
+    constructor(fn, scheduler = null, scope) {
+        this.fn = fn;
+        this.scheduler = scheduler;
+        this.active = true;
+        this.deps = [];
+        recordEffectScope(this, scope);
     }
-    const effect = createReactiveEffect(fn, options);
-    if (!options.lazy) {
-        effect();
-    }
-    return effect;
-}
-function stop(effect) {
-    if (effect.active) {
-        cleanup(effect);
-        if (effect.options.onStop) {
-            effect.options.onStop();
+    run() {
+        if (!this.active) {
+            return this.fn();
         }
-        effect.active = false;
-    }
-}
-let uid = 0;
-function createReactiveEffect(fn, options) {
-    const effect = function reactiveEffect() {
-        if (!effect.active) {
-            return options.scheduler ? undefined : fn();
-        }
-        if (!effectStack.includes(effect)) {
-            cleanup(effect);
+        if (!effectStack.includes(this)) {
             try {
+                effectStack.push((activeEffect = this));
                 enableTracking();
-                effectStack.push(effect);
-                activeEffect = effect;
-                return fn();
+                trackOpBit = 1 << ++effectTrackDepth;
+                if (effectTrackDepth <= maxMarkerBits) {
+                    initDepMarkers(this);
+                }
+                else {
+                    cleanupEffect(this);
+                }
+                return this.fn();
             }
             finally {
-                effectStack.pop();
+                if (effectTrackDepth <= maxMarkerBits) {
+                    finalizeDepMarkers(this);
+                }
+                trackOpBit = 1 << --effectTrackDepth;
                 resetTracking();
-                activeEffect = effectStack[effectStack.length - 1];
+                effectStack.pop();
+                const n = effectStack.length;
+                activeEffect = n > 0 ? effectStack[n - 1] : undefined;
             }
         }
-    };
-    effect.id = uid++;
-    effect.allowRecurse = !!options.allowRecurse;
-    effect._isEffect = true;
-    effect.active = true;
-    effect.raw = fn;
-    effect.deps = [];
-    effect.options = options;
-    return effect;
+    }
+    stop() {
+        if (this.active) {
+            cleanupEffect(this);
+            if (this.onStop) {
+                this.onStop();
+            }
+            this.active = false;
+        }
+    }
 }
-function cleanup(effect) {
+function cleanupEffect(effect) {
     const { deps } = effect;
     if (deps.length) {
         for (let i = 0; i < deps.length; i++) {
@@ -159,6 +283,26 @@ function cleanup(effect) {
         }
         deps.length = 0;
     }
+}
+function effect(fn, options) {
+    if (fn.effect) {
+        fn = fn.effect.fn;
+    }
+    const _effect = new ReactiveEffect(fn);
+    if (options) {
+        extend(_effect, options);
+        if (options.scope)
+            recordEffectScope(_effect, options.scope);
+    }
+    if (!options || !options.lazy) {
+        _effect.run();
+    }
+    const runner = _effect.run.bind(_effect);
+    runner.effect = _effect;
+    return runner;
+}
+function stop(runner) {
+    runner.effect.stop();
 }
 let shouldTrack = true;
 const trackStack = [];
@@ -175,7 +319,7 @@ function resetTracking() {
     shouldTrack = last === undefined ? true : last;
 }
 function track(target, type, key) {
-    if (!shouldTrack || activeEffect === undefined) {
+    if (!isTracking()) {
         return;
     }
     let depsMap = targetMap.get(target);
@@ -184,18 +328,34 @@ function track(target, type, key) {
     }
     let dep = depsMap.get(key);
     if (!dep) {
-        depsMap.set(key, (dep = new Set()));
+        depsMap.set(key, (dep = createDep()));
     }
-    if (!dep.has(activeEffect)) {
+    const eventInfo = { effect: activeEffect, target, type, key }
+        ;
+    trackEffects(dep, eventInfo);
+}
+function isTracking() {
+    return shouldTrack && activeEffect !== undefined;
+}
+function trackEffects(dep, debuggerEventExtraInfo) {
+    let shouldTrack = false;
+    if (effectTrackDepth <= maxMarkerBits) {
+        if (!newTracked(dep)) {
+            dep.n |= trackOpBit; // set newly tracked
+            shouldTrack = !wasTracked(dep);
+        }
+    }
+    else {
+        // Full cleanup mode.
+        shouldTrack = !dep.has(activeEffect);
+    }
+    if (shouldTrack) {
         dep.add(activeEffect);
         activeEffect.deps.push(dep);
-        if (activeEffect.options.onTrack) {
-            activeEffect.options.onTrack({
-                effect: activeEffect,
-                target,
-                type,
-                key
-            });
+        if (activeEffect.onTrack) {
+            activeEffect.onTrack(Object.assign({
+                effect: activeEffect
+            }, debuggerEventExtraInfo));
         }
     }
 }
@@ -205,82 +365,89 @@ function trigger(target, type, key, newValue, oldValue, oldTarget) {
         // never been tracked
         return;
     }
-    const effects = new Set();
-    const add = (effectsToAdd) => {
-        if (effectsToAdd) {
-            effectsToAdd.forEach(effect => {
-                if (effect !== activeEffect || effect.allowRecurse) {
-                    effects.add(effect);
-                }
-            });
-        }
-    };
+    let deps = [];
     if (type === "clear" /* CLEAR */) {
         // collection being cleared
         // trigger all effects for target
-        depsMap.forEach(add);
+        deps = [...depsMap.values()];
     }
     else if (key === 'length' && isArray(target)) {
         depsMap.forEach((dep, key) => {
             if (key === 'length' || key >= newValue) {
-                add(dep);
+                deps.push(dep);
             }
         });
     }
     else {
         // schedule runs for SET | ADD | DELETE
         if (key !== void 0) {
-            add(depsMap.get(key));
+            deps.push(depsMap.get(key));
         }
         // also run for iteration key on ADD | DELETE | Map.SET
         switch (type) {
             case "add" /* ADD */:
                 if (!isArray(target)) {
-                    add(depsMap.get(ITERATE_KEY));
+                    deps.push(depsMap.get(ITERATE_KEY));
                     if (isMap(target)) {
-                        add(depsMap.get(MAP_KEY_ITERATE_KEY));
+                        deps.push(depsMap.get(MAP_KEY_ITERATE_KEY));
                     }
                 }
                 else if (isIntegerKey(key)) {
                     // new index added to array -> length changes
-                    add(depsMap.get('length'));
+                    deps.push(depsMap.get('length'));
                 }
                 break;
             case "delete" /* DELETE */:
                 if (!isArray(target)) {
-                    add(depsMap.get(ITERATE_KEY));
+                    deps.push(depsMap.get(ITERATE_KEY));
                     if (isMap(target)) {
-                        add(depsMap.get(MAP_KEY_ITERATE_KEY));
+                        deps.push(depsMap.get(MAP_KEY_ITERATE_KEY));
                     }
                 }
                 break;
             case "set" /* SET */:
                 if (isMap(target)) {
-                    add(depsMap.get(ITERATE_KEY));
+                    deps.push(depsMap.get(ITERATE_KEY));
                 }
                 break;
         }
     }
-    const run = (effect) => {
-        if (effect.options.onTrigger) {
-            effect.options.onTrigger({
-                effect,
-                target,
-                key,
-                type,
-                newValue,
-                oldValue,
-                oldTarget
-            });
+    const eventInfo = { target, type, key, newValue, oldValue, oldTarget }
+        ;
+    if (deps.length === 1) {
+        if (deps[0]) {
+            {
+                triggerEffects(deps[0], eventInfo);
+            }
         }
-        if (effect.options.scheduler) {
-            effect.options.scheduler(effect);
+    }
+    else {
+        const effects = [];
+        for (const dep of deps) {
+            if (dep) {
+                effects.push(...dep);
+            }
         }
-        else {
-            effect();
+        {
+            triggerEffects(createDep(effects), eventInfo);
         }
-    };
-    effects.forEach(run);
+    }
+}
+function triggerEffects(dep, debuggerEventExtraInfo) {
+    // spread into array for stabilization
+    for (const effect of isArray(dep) ? dep : [...dep]) {
+        if (effect !== activeEffect || effect.allowRecurse) {
+            if (effect.onTrigger) {
+                effect.onTrigger(extend({ effect }, debuggerEventExtraInfo));
+            }
+            if (effect.scheduler) {
+                effect.scheduler();
+            }
+            else {
+                effect.run();
+            }
+        }
+    }
 }
 
 const isNonTrackableKeys = /*#__PURE__*/ makeMap(`__proto__,__v_isRef,__isVue`);
@@ -291,34 +458,36 @@ const get = /*#__PURE__*/ createGetter();
 const shallowGet = /*#__PURE__*/ createGetter(false, true);
 const readonlyGet = /*#__PURE__*/ createGetter(true);
 const shallowReadonlyGet = /*#__PURE__*/ createGetter(true, true);
-const arrayInstrumentations = {};
-['includes', 'indexOf', 'lastIndexOf'].forEach(key => {
-    const method = Array.prototype[key];
-    arrayInstrumentations[key] = function (...args) {
-        const arr = toRaw(this);
-        for (let i = 0, l = this.length; i < l; i++) {
-            track(arr, "get" /* GET */, i + '');
-        }
-        // we run the method using the original args first (which may be reactive)
-        const res = method.apply(arr, args);
-        if (res === -1 || res === false) {
-            // if that didn't work, run it again using raw values.
-            return method.apply(arr, args.map(toRaw));
-        }
-        else {
+const arrayInstrumentations = /*#__PURE__*/ createArrayInstrumentations();
+function createArrayInstrumentations() {
+    const instrumentations = {};
+    ['includes', 'indexOf', 'lastIndexOf'].forEach(key => {
+        instrumentations[key] = function (...args) {
+            const arr = toRaw(this);
+            for (let i = 0, l = this.length; i < l; i++) {
+                track(arr, "get" /* GET */, i + '');
+            }
+            // we run the method using the original args first (which may be reactive)
+            const res = arr[key](...args);
+            if (res === -1 || res === false) {
+                // if that didn't work, run it again using raw values.
+                return arr[key](...args.map(toRaw));
+            }
+            else {
+                return res;
+            }
+        };
+    });
+    ['push', 'pop', 'shift', 'unshift', 'splice'].forEach(key => {
+        instrumentations[key] = function (...args) {
+            pauseTracking();
+            const res = toRaw(this)[key].apply(this, args);
+            resetTracking();
             return res;
-        }
-    };
-});
-['push', 'pop', 'shift', 'unshift', 'splice'].forEach(key => {
-    const method = Array.prototype[key];
-    arrayInstrumentations[key] = function (...args) {
-        pauseTracking();
-        const res = method.apply(this, args);
-        resetTracking();
-        return res;
-    };
-});
+        };
+    });
+    return instrumentations;
+}
 function createGetter(isReadonly = false, shallow = false) {
     return function get(target, key, receiver) {
         if (key === "__v_isReactive" /* IS_REACTIVE */) {
@@ -343,9 +512,7 @@ function createGetter(isReadonly = false, shallow = false) {
             return Reflect.get(arrayInstrumentations, key, receiver);
         }
         const res = Reflect.get(target, key, receiver);
-        if (isSymbol(key)
-            ? builtInSymbols.has(key)
-            : isNonTrackableKeys(key)) {
+        if (isSymbol(key) ? builtInSymbols.has(key) : isNonTrackableKeys(key)) {
             return res;
         }
         if (!isReadonly) {
@@ -439,14 +606,14 @@ const readonlyHandlers = {
         return true;
     }
 };
-const shallowReactiveHandlers = extend({}, mutableHandlers, {
+const shallowReactiveHandlers = /*#__PURE__*/ extend({}, mutableHandlers, {
     get: shallowGet,
     set: shallowSet
 });
 // Props handlers are special in the sense that it should not unwrap top-level
 // refs (in order to allow refs to be explicitly passed down), but should
 // retain the reactivity of the normal readonly object.
-const shallowReadonlyHandlers = extend({}, readonlyHandlers, {
+const shallowReadonlyHandlers = /*#__PURE__*/ extend({}, readonlyHandlers, {
     get: shallowReadonlyGet
 });
 
@@ -471,6 +638,11 @@ function get$1(target, key, isReadonly = false, isShallow = false) {
     }
     else if (has.call(rawTarget, rawKey)) {
         return wrap(target.get(rawKey));
+    }
+    else if (target !== rawTarget) {
+        // #3602 readonly(reactive(Map))
+        // ensure that the nested reactive `Map` can do tracking for itself
+        target.get(key);
     }
 }
 function has$1(key, isReadonly = false) {
@@ -611,73 +783,82 @@ function createReadonlyMethod(type) {
         return type === "delete" /* DELETE */ ? false : this;
     };
 }
-const mutableInstrumentations = {
-    get(key) {
-        return get$1(this, key);
-    },
-    get size() {
-        return size(this);
-    },
-    has: has$1,
-    add,
-    set: set$1,
-    delete: deleteEntry,
-    clear,
-    forEach: createForEach(false, false)
-};
-const shallowInstrumentations = {
-    get(key) {
-        return get$1(this, key, false, true);
-    },
-    get size() {
-        return size(this);
-    },
-    has: has$1,
-    add,
-    set: set$1,
-    delete: deleteEntry,
-    clear,
-    forEach: createForEach(false, true)
-};
-const readonlyInstrumentations = {
-    get(key) {
-        return get$1(this, key, true);
-    },
-    get size() {
-        return size(this, true);
-    },
-    has(key) {
-        return has$1.call(this, key, true);
-    },
-    add: createReadonlyMethod("add" /* ADD */),
-    set: createReadonlyMethod("set" /* SET */),
-    delete: createReadonlyMethod("delete" /* DELETE */),
-    clear: createReadonlyMethod("clear" /* CLEAR */),
-    forEach: createForEach(true, false)
-};
-const shallowReadonlyInstrumentations = {
-    get(key) {
-        return get$1(this, key, true, true);
-    },
-    get size() {
-        return size(this, true);
-    },
-    has(key) {
-        return has$1.call(this, key, true);
-    },
-    add: createReadonlyMethod("add" /* ADD */),
-    set: createReadonlyMethod("set" /* SET */),
-    delete: createReadonlyMethod("delete" /* DELETE */),
-    clear: createReadonlyMethod("clear" /* CLEAR */),
-    forEach: createForEach(true, true)
-};
-const iteratorMethods = ['keys', 'values', 'entries', Symbol.iterator];
-iteratorMethods.forEach(method => {
-    mutableInstrumentations[method] = createIterableMethod(method, false, false);
-    readonlyInstrumentations[method] = createIterableMethod(method, true, false);
-    shallowInstrumentations[method] = createIterableMethod(method, false, true);
-    shallowReadonlyInstrumentations[method] = createIterableMethod(method, true, true);
-});
+function createInstrumentations() {
+    const mutableInstrumentations = {
+        get(key) {
+            return get$1(this, key);
+        },
+        get size() {
+            return size(this);
+        },
+        has: has$1,
+        add,
+        set: set$1,
+        delete: deleteEntry,
+        clear,
+        forEach: createForEach(false, false)
+    };
+    const shallowInstrumentations = {
+        get(key) {
+            return get$1(this, key, false, true);
+        },
+        get size() {
+            return size(this);
+        },
+        has: has$1,
+        add,
+        set: set$1,
+        delete: deleteEntry,
+        clear,
+        forEach: createForEach(false, true)
+    };
+    const readonlyInstrumentations = {
+        get(key) {
+            return get$1(this, key, true);
+        },
+        get size() {
+            return size(this, true);
+        },
+        has(key) {
+            return has$1.call(this, key, true);
+        },
+        add: createReadonlyMethod("add" /* ADD */),
+        set: createReadonlyMethod("set" /* SET */),
+        delete: createReadonlyMethod("delete" /* DELETE */),
+        clear: createReadonlyMethod("clear" /* CLEAR */),
+        forEach: createForEach(true, false)
+    };
+    const shallowReadonlyInstrumentations = {
+        get(key) {
+            return get$1(this, key, true, true);
+        },
+        get size() {
+            return size(this, true);
+        },
+        has(key) {
+            return has$1.call(this, key, true);
+        },
+        add: createReadonlyMethod("add" /* ADD */),
+        set: createReadonlyMethod("set" /* SET */),
+        delete: createReadonlyMethod("delete" /* DELETE */),
+        clear: createReadonlyMethod("clear" /* CLEAR */),
+        forEach: createForEach(true, true)
+    };
+    const iteratorMethods = ['keys', 'values', 'entries', Symbol.iterator];
+    iteratorMethods.forEach(method => {
+        mutableInstrumentations[method] = createIterableMethod(method, false, false);
+        readonlyInstrumentations[method] = createIterableMethod(method, true, false);
+        shallowInstrumentations[method] = createIterableMethod(method, false, true);
+        shallowReadonlyInstrumentations[method] = createIterableMethod(method, true, true);
+    });
+    return [
+        mutableInstrumentations,
+        readonlyInstrumentations,
+        shallowInstrumentations,
+        shallowReadonlyInstrumentations
+    ];
+}
+const [mutableInstrumentations, readonlyInstrumentations, shallowInstrumentations, shallowReadonlyInstrumentations] = /* #__PURE__*/ createInstrumentations();
 function createInstrumentationGetter(isReadonly, shallow) {
     const instrumentations = shallow
         ? isReadonly
@@ -702,16 +883,16 @@ function createInstrumentationGetter(isReadonly, shallow) {
     };
 }
 const mutableCollectionHandlers = {
-    get: createInstrumentationGetter(false, false)
+    get: /*#__PURE__*/ createInstrumentationGetter(false, false)
 };
 const shallowCollectionHandlers = {
-    get: createInstrumentationGetter(false, true)
+    get: /*#__PURE__*/ createInstrumentationGetter(false, true)
 };
 const readonlyCollectionHandlers = {
-    get: createInstrumentationGetter(true, false)
+    get: /*#__PURE__*/ createInstrumentationGetter(true, false)
 };
 const shallowReadonlyCollectionHandlers = {
-    get: createInstrumentationGetter(true, true)
+    get: /*#__PURE__*/ createInstrumentationGetter(true, true)
 };
 function checkIdentityKeys(target, has, key) {
     const rawKey = toRaw(key);
@@ -819,50 +1000,81 @@ function isProxy(value) {
     return isReactive(value) || isReadonly(value);
 }
 function toRaw(observed) {
-    return ((observed && toRaw(observed["__v_raw" /* RAW */])) || observed);
+    const raw = observed && observed["__v_raw" /* RAW */];
+    return raw ? toRaw(raw) : observed;
 }
 function markRaw(value) {
     def(value, "__v_skip" /* SKIP */, true);
     return value;
 }
 
+function trackRefValue(ref) {
+    if (isTracking()) {
+        ref = toRaw(ref);
+        if (!ref.dep) {
+            ref.dep = createDep();
+        }
+        {
+            trackEffects(ref.dep, {
+                target: ref,
+                type: "get" /* GET */,
+                key: 'value'
+            });
+        }
+    }
+}
+function triggerRefValue(ref, newVal) {
+    ref = toRaw(ref);
+    if (ref.dep) {
+        {
+            triggerEffects(ref.dep, {
+                target: ref,
+                type: "set" /* SET */,
+                key: 'value',
+                newValue: newVal
+            });
+        }
+    }
+}
 const convert = (val) => isObject(val) ? reactive(val) : val;
 function isRef(r) {
     return Boolean(r && r.__v_isRef === true);
 }
 function ref(value) {
-    return createRef(value);
+    return createRef(value, false);
 }
 function shallowRef(value) {
     return createRef(value, true);
 }
 class RefImpl {
-    constructor(_rawValue, _shallow = false) {
-        this._rawValue = _rawValue;
+    constructor(value, _shallow) {
         this._shallow = _shallow;
+        this.dep = undefined;
         this.__v_isRef = true;
-        this._value = _shallow ? _rawValue : convert(_rawValue);
+        this._rawValue = _shallow ? value : toRaw(value);
+        this._value = _shallow ? value : convert(value);
     }
     get value() {
-        track(toRaw(this), "get" /* GET */, 'value');
+        trackRefValue(this);
         return this._value;
     }
     set value(newVal) {
-        if (hasChanged(toRaw(newVal), this._rawValue)) {
+        newVal = this._shallow ? newVal : toRaw(newVal);
+        if (hasChanged(newVal, this._rawValue)) {
             this._rawValue = newVal;
             this._value = this._shallow ? newVal : convert(newVal);
-            trigger(toRaw(this), "set" /* SET */, 'value', newVal);
+            triggerRefValue(this, newVal);
         }
     }
 }
-function createRef(rawValue, shallow = false) {
+function createRef(rawValue, shallow) {
     if (isRef(rawValue)) {
         return rawValue;
     }
     return new RefImpl(rawValue, shallow);
 }
 function triggerRef(ref) {
-    trigger(toRaw(ref), "set" /* SET */, 'value', ref.value );
+    triggerRefValue(ref, ref.value );
 }
 function unref(ref) {
     return isRef(ref) ? ref.value : ref;
@@ -887,8 +1099,9 @@ function proxyRefs(objectWithRefs) {
 }
 class CustomRefImpl {
     constructor(factory) {
+        this.dep = undefined;
         this.__v_isRef = true;
-        const { get, set } = factory(() => track(this, "get" /* GET */, 'value'), () => trigger(this, "set" /* SET */, 'value'));
+        const { get, set } = factory(() => trackRefValue(this), () => triggerRefValue(this));
         this._get = get;
         this._set = set;
     }
@@ -926,23 +1139,20 @@ class ObjectRefImpl {
     }
 }
 function toRef(object, key) {
-    return isRef(object[key])
-        ? object[key]
-        : new ObjectRefImpl(object, key);
+    const val = object[key];
+    return isRef(val) ? val : new ObjectRefImpl(object, key);
 }
 
 class ComputedRefImpl {
     constructor(getter, _setter, isReadonly) {
         this._setter = _setter;
+        this.dep = undefined;
         this._dirty = true;
         this.__v_isRef = true;
-        this.effect = effect(getter, {
-            lazy: true,
-            scheduler: () => {
-                if (!this._dirty) {
-                    this._dirty = true;
-                    trigger(toRaw(this), "set" /* SET */, 'value');
-                }
+        this.effect = new ReactiveEffect(getter, () => {
+            if (!this._dirty) {
+                this._dirty = true;
+                triggerRefValue(this);
             }
         });
         this["__v_isReadonly" /* IS_READONLY */] = isReadonly;
@@ -950,18 +1160,18 @@ class ComputedRefImpl {
     get value() {
         // the computed ref may get wrapped by other proxies e.g. readonly() #3376
         const self = toRaw(this);
+        trackRefValue(self);
         if (self._dirty) {
-            self._value = this.effect();
             self._dirty = false;
+            self._value = self.effect.run();
         }
-        track(self, "get" /* GET */, 'value');
         return self._value;
     }
     set value(newValue) {
         this._setter(newValue);
     }
 }
-function computed(getterOrOptions) {
+function computed(getterOrOptions, debugOptions) {
     let getter;
     let setter;
     if (isFunction(getterOrOptions)) {
@@ -975,7 +1185,87 @@ function computed(getterOrOptions) {
         getter = getterOrOptions.get;
         setter = getterOrOptions.set;
     }
-    return new ComputedRefImpl(getter, setter, isFunction(getterOrOptions) || !getterOrOptions.set);
+    const cRef = new ComputedRefImpl(getter, setter, isFunction(getterOrOptions) || !getterOrOptions.set);
+    if (debugOptions) {
+        cRef.effect.onTrack = debugOptions.onTrack;
+        cRef.effect.onTrigger = debugOptions.onTrigger;
+    }
+    return cRef;
+}
+
+var _a;
+const tick = Promise.resolve();
+const queue$1 = [];
+let queued = false;
+const scheduler = (fn) => {
+    queue$1.push(fn);
+    if (!queued) {
+        queued = true;
+        tick.then(flush);
+    }
+};
+const flush = () => {
+    for (let i = 0; i < queue$1.length; i++) {
+        queue$1[i]();
+    }
+    queue$1.length = 0;
+    queued = false;
+};
+class DeferredComputedRefImpl {
+    constructor(getter) {
+        this.dep = undefined;
+        this._dirty = true;
+        this.__v_isRef = true;
+        this[_a] = true;
+        let compareTarget;
+        let hasCompareTarget = false;
+        let scheduled = false;
+        this.effect = new ReactiveEffect(getter, (computedTrigger) => {
+            if (this.dep) {
+                if (computedTrigger) {
+                    compareTarget = this._value;
+                    hasCompareTarget = true;
+                }
+                else if (!scheduled) {
+                    const valueToCompare = hasCompareTarget ? compareTarget : this._value;
+                    scheduled = true;
+                    hasCompareTarget = false;
+                    scheduler(() => {
+                        if (this.effect.active && this._get() !== valueToCompare) {
+                            triggerRefValue(this);
+                        }
+                        scheduled = false;
+                    });
+                }
+                // chained upstream computeds are notified synchronously to ensure
+                // value invalidation in case of sync access; normal effects are
+                // deferred to be triggered in scheduler.
+                for (const e of this.dep) {
+                    if (e.computed) {
+                        e.scheduler(true /* computedTrigger */);
+                    }
+                }
+            }
+            this._dirty = true;
+        });
+        this.effect.computed = true;
+    }
+    _get() {
+        if (this._dirty) {
+            this._dirty = false;
+            return (this._value = this.effect.run());
+        }
+        return this._value;
+    }
+    get value() {
+        trackRefValue(this);
+        // the computed ref may get wrapped by other proxies e.g. readonly() #3376
+        return toRaw(this)._get();
+    }
+}
+_a = "__v_isReadonly" /* IS_READONLY */;
+function deferredComputed(getter) {
+    return new DeferredComputedRefImpl(getter);
 }
 
 var ShapeFlags;
@@ -1644,5 +1934,5 @@ function renderSlot(slots, name, props) {
     }
 }
 
-export { ITERATE_KEY, computed, createApp, createTextVNode, customRef, effect, enableTracking, getCurrentInstance, h, inject, isProxy, isReactive, isReadonly, isRef, markRaw, pauseTracking, provide, proxyRefs, reactive, readonly, ref, renderSlot, resetTracking, shallowReactive, shallowReadonly, shallowRef, stop, toRaw, toRef, toRefs, track, trigger, triggerRef, unref };
+export { EffectScope, ITERATE_KEY, ReactiveEffect, computed, createApp, createTextVNode, customRef, deferredComputed, effect, effectScope, enableTracking, getCurrentInstance, getCurrentScope, h, inject, isProxy, isReactive, isReadonly, isRef, markRaw, onScopeDispose, pauseTracking, provide, proxyRefs, reactive, readonly, ref, renderSlot, resetTracking, shallowReactive, shallowReadonly, shallowRef, stop, toRaw, toRef, toRefs, track, trigger, triggerRef, unref };
 //# sourceMappingURL=mini-vue.esm.js.map
