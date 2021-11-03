@@ -132,9 +132,9 @@ const store = createStore<GlobalDataProps>({
       // if (!state.columns.isLoaded) {
       //   return asyncAndCommit('/columns', 'fetchColumns', commit)
       // }
-      if (state.columns.currentPage < currentPage) {
-        return asyncAndCommit(`/columns?currentPage=${currentPage}&pageSize=${pageSize}`, 'fetchColumns', commit)
-      }
+      // if (state.columns.currentPage < currentPage) {
+      //   return asyncAndCommit(`/columns?currentPage=${currentPage}&pageSize=${pageSize}`, 'fetchColumns', commit)
+      // }
     },
     fetchColumn({ state, commit }, cid) {
       if (!state.columns.data[cid]) {

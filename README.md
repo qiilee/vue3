@@ -11,3 +11,5 @@
 | mini-vue | 来自[github](https://github.com/cuixiaorui/mini-vue) | 实现最简 vue3 模型( Help you learn more efficiently vue3 source code ) ，通过github搜索vue3获取，mac运行成功 | 
 | vue-manage-system | 来自[github](https://github.com/lin-xin/vue-manage-system) | 基于Vue3 + Element Plus 的后台管理系统解决方案 ，通过github搜索vue3获取 | 
 | typescript-vue3.0 | 使用 Typescript + Vue3 开发高仿知乎专栏文档站点 | 正版为[https://coding.imooc.com/class/449.html](https://coding.imooc.com/class/449.html) | 
+| newbee-mall-vue3-app | 来自[github](https://github.com/newbee-ltd/newbee-mall-vue3-app) | Vue3 全家桶 + Vant 搭建大型单页面商城项目，新蜂商城 Vue3 版本，技术栈为 Vue 3.0 + Vue-Router 4.0 + Vuex 4.0 + Vant 3.0。通过github搜索vue3获取 | 
+| vue3-admin | 来自[github](https://github.com/newbee-ltd/vue3-admin) | Vue 3.0 + Vite 2.0 + Vue-Router 4.0 + Element-Plus + Echarts 5.0 + Axios 开发的后台管理系统，通过github搜索vue3获取 | 
