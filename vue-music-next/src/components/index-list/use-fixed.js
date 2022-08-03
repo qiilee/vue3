@@ -43,6 +43,7 @@ export default function useFixed(props) {
 
   function calculate() {
     const list = groupRef.value.children
+    console.log('list', list)
     const listHeightsVal = listHeights.value
     let height = 0
 
@@ -53,6 +54,8 @@ export default function useFixed(props) {
       height += list[i].clientHeight
       listHeightsVal.push(height)
     }
+    console.log('listHeightsVal', listHeightsVal)
+    console.log('array', [1, 2, 3])
   }
 
   function onScroll(pos) {
