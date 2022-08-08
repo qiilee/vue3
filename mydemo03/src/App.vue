@@ -3,8 +3,20 @@
     <router-link to="/">Home</router-link> |
     <router-link to="/about">About</router-link>
   </div>
-  <router-view/>
+  <router-view />
 </template>
+
+<script lang="ts">
+import { ref } from 'vue'
+export default {
+  name: 'App',
+  components: {},
+  setup () {
+    const a = ref(0)
+    return { a }
+  }
+}
+</script>
 
 <style lang="less">
 #app {

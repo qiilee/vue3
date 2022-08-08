@@ -17,3 +17,8 @@ export interface UserProps {
   column?: string;
   email?: string;
 }
+export interface Student {
+  name: string
+  class?: string
+  age: number
+}
