@@ -76,8 +76,9 @@ export default {
       },
       double: computed(() => data.count * 3),
     });
+
     // 2
-    const greetings = ref("");
+    const greetings = ref("6666");
     const updateGreeting = () => {
       greetings.value += "Hello! ";
     };

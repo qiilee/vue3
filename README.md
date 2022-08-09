@@ -12,6 +12,7 @@
 | vue-manage-system | 来自[github](https://github.com/lin-xin/vue-manage-system) | 基于Vue3 + Element Plus 的后台管理系统解决方案 ，通过github搜索vue3获取 | 
 | newbee-mall-vue3-app | 来自[github](https://github.com/newbee-ltd/newbee-mall-vue3-app) | Vue3 全家桶 + Vant 搭建大型单页面商城项目，新蜂商城 Vue3 版本，技术栈为 Vue 3.0 + Vue-Router 4.0 + Vuex 4.0 + Vant 3.0。通过github搜索vue3获取 | 
 | vue3-admin | 来自[github](https://github.com/newbee-ltd/vue3-admin) | Vue 3.0 + Vite 2.0 + Vue-Router 4.0 + Element-Plus + Echarts 5.0 + Axios 开发的后台管理系统，通过github搜索vue3获取 | 
+| vue-vben-admin | 来自[github](https://github.com/anncwb/vue-vben-admin) | 基于ant-design-vue,typescript,vue3.0,vite实现的 vue3 风格的后台管理系统，通过https://vue3js.cn/，Vue3开源项目获取。因本地node版本问题未运行成功 | 
 | typescript-vue3.0 | 使用 Typescript + Vue3 开发高仿知乎专栏文档站点 | 正版为[https://coding.imooc.com/class/449.html](https://coding.imooc.com/class/449.html) | 
 | vue-music-next | Vue3.0高阶实战：开发高质量音乐Web app（运行成功，项目很NB） | 正版为[https://coding.imooc.com/class/503.html](https://coding.imooc.com/class/503.html) | 
 | manager-fe | SpringBoot+Vue3 项目实战，打造企业级在线办公系统（运行成功，是基础版） | 正版为[https://coding.imooc.com/class/530.html](https://coding.imooc.com/class/530.html) | 
