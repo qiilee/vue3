@@ -144,7 +144,7 @@ export default {
     let encryptData1 = sm4.encrypt(msg, key) // 加密，默认输出 16 进制字符串，默认使用 pkcs#7 填充（传 pkcs#5 也会走 pkcs#7 填充）
     let encryptData2 = sm4.encrypt(msg, key, {padding: 'none'}) // 加密，不使用 padding
     let encryptData3 = sm4.encrypt(msg, key, {padding: 'none', output: 'array'}) // 加密，不使用 padding，输出为字节数组
-    let encryptData4 = sm4.encrypt(msg, key, {mode: 'cbc', iv: 'fedcba98765432100123456789abcdef'}) // 加密，cbc 模式
+    let encryptData4 = sm4.encrypt(msg, key, {padding: 'pkcs#5', mode: 'cbc', iv: 'fedcba98765432100123456789abcdef'}) // 加密，cbc 模式
     console.log("encryptData1", encryptData1)
     console.log("encryptData2", encryptData2)
     console.log("encryptData3", encryptData3)
@@ -152,7 +152,7 @@ export default {
     let decryptData1 = sm4.decrypt(encryptData1, key) // 解密，默认输出 utf8 字符串，默认使用 pkcs#7 填充（传 pkcs#5 也会走 pkcs#7 填充）
     let decryptData2 = sm4.decrypt(encryptData2, key, {padding: 'none'}) // 解密，不使用 padding
     let decryptData3 = sm4.decrypt(encryptData3, key, {padding: 'none', output: 'array'}) // 解密，不使用 padding，输出为字节数组
-    let decryptData4 = sm4.decrypt(encryptData4, key, {mode: 'cbc', iv: 'fedcba98765432100123456789abcdef'}) // 解密，cbc 模式
+    let decryptData4 = sm4.decrypt(encryptData4, key, {padding: 'pkcs#5', mode: 'cbc', iv: 'fedcba98765432100123456789abcdef'}) // 解密，cbc 模式
     console.log("decryptData1", decryptData1)
     console.log("decryptData2", decryptData2)
     console.log("decryptData3", decryptData3)

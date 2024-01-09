@@ -17,3 +17,6 @@
 | vue-music-next | Vue3.0高阶实战：开发高质量音乐Web app（运行成功，项目很NB） | 正版为[https://coding.imooc.com/class/503.html](https://coding.imooc.com/class/503.html) | 
 | manager-fe | SpringBoot+Vue3 项目实战，打造企业级在线办公系统（运行成功，是基础版） | 正版为[https://coding.imooc.com/class/530.html](https://coding.imooc.com/class/530.html) | 
 | code-master | 基于Vue3最新标准，实现后台前端综合解决方案（没运行成功） | 正版为[https://coding.imooc.com/class/542.html](https://coding.imooc.com/class/542.html) | 
+| vue3-rabbit | 来自[github](https://github.com/Zhuhaoran111/vue3-rabbit) | 基于vue3+pinia(状态管理)+vite+vue3构建工具+element-plus组件库开发的小兔仙网站项目，作为刚开始学习vue3项目很适合  | 
+| vue3-antd-admin | 来自[github](https://github.com/buqiyuan/vue3-antd-admin) | 基于 vite4.x/vue-cli5.x + vue3.x + ant-design-vue4.x + typescript hooks 的基础后台管理系统模板 RBAC的权限系统, JSON Schema动态表单,动态表格,漂亮锁屏界面 | 
+
